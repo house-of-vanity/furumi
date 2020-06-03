@@ -76,10 +76,10 @@ pub fn read() -> Config {
         warn!("Insecure server detected. Set `username` and `password` directives to use auth.");
     }
     Config {
-        server: server,
-        username: username,
-        password: password,
-        mountpoint: mountpoint,
+        server,
+        username,
+        password,
+        mountpoint,
         conf_file: config_file.to_string(),
     }
 }

@@ -1,11 +1,7 @@
 extern crate base64;
-use reqwest::{blocking::Client, header::CONTENT_LENGTH};
+
 use serde::Deserialize;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    env,
-    ffi::OsStr,
-    fmt,
     path::PathBuf,
     process,
     thread::sleep,
@@ -27,8 +23,8 @@ impl RemoteEntry {
     }
 }
 
-use chrono::format::ParseError;
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
+
+use chrono::{DateTime};
 
 pub async fn list_directory(
     server: &std::string::String,

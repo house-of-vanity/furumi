@@ -11,9 +11,9 @@ use polyfuse::{
     Context, DirEntry, FileAttr, Filesystem, Forget, Operation,
 };
 use slab::Slab;
-use std::error::Error;
-use std::mem::swap;
-use std::path::{Path, PathBuf};
+
+
+use std::path::{PathBuf};
 use std::{
     collections::hash_map::{Entry, HashMap},
     ffi::{OsStr, OsString},
@@ -27,6 +27,7 @@ use tracing_futures::Instrument;
 
 type Ino = u64;
 
+//noinspection RsUnresolvedReference
 #[derive(Debug)]
 struct INodeTable {
     map: HashMap<Ino, Arc<Mutex<INode>>>,
@@ -46,10 +47,12 @@ impl INodeTable {
         VacantEntry { table: self, ino }
     }
 
+    //noinspection RsUnresolvedReference
     fn get(&self, ino: Ino) -> Option<Arc<Mutex<INode>>> {
         self.map.get(&ino).cloned()
     }
 
+    //noinspection RsUnresolvedReference
     fn remove(&mut self, ino: Ino) -> Option<Arc<Mutex<INode>>> {
         self.map.remove(&ino)
     }
@@ -66,6 +69,7 @@ impl VacantEntry<'_> {
         self.ino
     }
 
+    //noinspection RsUnresolvedReference
     fn insert(self, inode: INode) {
         let Self { table, ino } = self;
         table.map.insert(ino, Arc::new(Mutex::new(inode)));
@@ -124,6 +128,9 @@ struct DirHandle {
     entries: Vec<Arc<DirEntry>>,
 }
 
+//noinspection RsUnresolvedReference
+//noinspection RsUnresolvedReference
+//noinspection RsUnresolvedReference
 #[derive(Debug)]
 pub struct MemFS {
     inodes: Mutex<INodeTable>,
@@ -133,6 +140,8 @@ pub struct MemFS {
 }
 
 impl MemFS {
+    //noinspection RsUnresolvedReference
+    //noinspection RsUnresolvedReference
     pub fn new(cfg: &config::Config) -> Self {
         let mut inodes = INodeTable::new();
         //let self.cfg = cfg;
@@ -383,7 +392,7 @@ impl MemFS {
                     _ => None,
                 }
             }
-            Err(e) => None,
+            Err(_e) => None,
         }
     }
 
@@ -597,6 +606,7 @@ impl MemFS {
         Some((uri, parent_ino))
     }
 
+    //noinspection RsUnresolvedReference
     async fn do_opendir(&self, op: &op::Opendir<'_>) -> io::Result<ReplyOpen> {
         error!("do_opendir: {:?}", op);
 

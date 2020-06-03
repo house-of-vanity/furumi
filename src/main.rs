@@ -2,7 +2,7 @@ use std::path::PathBuf;
 #[macro_use]
 extern crate log;
 use env_logger::Env;
-use std::{path::Path, process};
+use std::{process};
 
 mod config;
 mod filesystem;
