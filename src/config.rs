@@ -4,7 +4,6 @@ use std::process;
 extern crate chrono;
 extern crate config;
 
-
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Config {
     pub server: String,
@@ -13,7 +12,6 @@ pub struct Config {
     pub password: Option<String>,
     pub conf_file: String,
 }
-
 
 pub fn read() -> Config {
     // Parse opts and args
@@ -32,7 +30,11 @@ pub fn read() -> Config {
         .get_matches();
 
     info!("Logger initialized. Set RUST_LOG=[debug,error,info,warn,trace] Default: info");
-    info!("Starting {} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting {} {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
 
     // Read config file and env vars
     let config_file = cli_args.value_of("conf").unwrap();
@@ -64,15 +66,11 @@ pub fn read() -> Config {
 
     let username = match settings.get_str("username") {
         Ok(username) => Some(username),
-        Err(_) => {
-            None
-        }
+        Err(_) => None,
     };
     let password = match settings.get_str("password") {
         Ok(password) => Some(password),
-        Err(_) => {
-            None
-        }
+        Err(_) => None,
     };
     if password == None || username == None {
         warn!("Insecure server detected. Set `username` and `password` directives to use auth.");

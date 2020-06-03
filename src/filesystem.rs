@@ -4,7 +4,6 @@
 use crate::config;
 use crate::http;
 
-
 use polyfuse::{
     io::{Reader, Writer},
     op,
@@ -12,6 +11,9 @@ use polyfuse::{
     Context, DirEntry, FileAttr, Filesystem, Forget, Operation,
 };
 use slab::Slab;
+use std::error::Error;
+use std::mem::swap;
+use std::path::{Path, PathBuf};
 use std::{
     collections::hash_map::{Entry, HashMap},
     ffi::{OsStr, OsString},
@@ -22,10 +24,6 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing_futures::Instrument;
-use std::path::{Path, PathBuf};
-use std::mem::swap;
-use std::error::Error;
-
 
 type Ino = u64;
 
@@ -194,8 +192,8 @@ impl MemFS {
     }
 
     async fn make_node<F>(&self, parent: Ino, name: &OsStr, f: F) -> io::Result<ReplyEntry>
-        where
-            F: FnOnce(&VacantEntry<'_>) -> INode,
+    where
+        F: FnOnce(&VacantEntry<'_>) -> INode,
     {
         debug!("make_node: parent: {:?}, name: {:?}", parent, name);
         let mut inodes = self.inodes.lock().await;
@@ -348,7 +346,6 @@ impl MemFS {
         let mut full_uri: PathBuf = PathBuf::new();
         if parent_ino == 1 {
             full_uri = PathBuf::from("/");
-
         } else {
             let mut vec_full_uri: Vec<PathBuf> = Vec::new();
             let mut inode = parent_ino;
@@ -357,8 +354,7 @@ impl MemFS {
                 if p.1 != 0 {
                     vec_full_uri.push(p.0);
                     inode = p.1;
-                }
-                else {
+                } else {
                     break;
                 }
             }
@@ -372,7 +368,7 @@ impl MemFS {
         Ok(full_uri)
     }
 
-    async fn name_to_inode(&self, p_inode: u64, name: &OsStr) -> Option<u64>{
+    async fn name_to_inode(&self, p_inode: u64, name: &OsStr) -> Option<u64> {
         let inodes = self.inodes.lock().await;
         match inodes.get(p_inode).ok_or_else(no_entry) {
             Ok(inode) => {
@@ -380,16 +376,14 @@ impl MemFS {
                 warn!("name_to_inode p_inode - {:?} name - {:?}", p_inode, name);
 
                 match &inode.kind {
-                    INodeKind::Directory(ref dir) => {
-                        match dir.children.get(name) {
-                            Some(name) => Some(name.clone()),
-                            None => None
-                        }
+                    INodeKind::Directory(ref dir) => match dir.children.get(name) {
+                        Some(name) => Some(name.clone()),
+                        None => None,
                     },
-                    _ => None
+                    _ => None,
                 }
-            },
-            Err(e) => None
+            }
+            Err(e) => None,
         }
     }
 
@@ -398,8 +392,7 @@ impl MemFS {
 
         //warn!("do_lookup f_inode {:?}", f_inode);
 
-        match self.name_to_inode(
-            op.parent(), op.name()).await {
+        match self.name_to_inode(op.parent(), op.name()).await {
             Some(f_inode) => {
                 warn!("do_lookup f_inode {:?}", f_inode);
                 let inodes = self.inodes.lock().await;
@@ -414,13 +407,16 @@ impl MemFS {
                         file_path.push(op.name());
                         file_path
                     }
-                    _ => {drop(inode);
+                    _ => {
+                        drop(inode);
                         drop(inodes);
-                        PathBuf::new()}
+                        PathBuf::new()
+                    }
                 };
                 warn!("{:?}", file_path);
-                self.fetch_remote(file_path, f_inode).await;}
-            None => warn!("Cant find inode for {:?}", op.name())
+                self.fetch_remote(file_path, f_inode).await;
+            }
+            None => warn!("Cant find inode for {:?}", op.name()),
         }
 
         self.lookup_inode(op.parent(), op.name()).await
@@ -499,63 +495,62 @@ impl MemFS {
         }
     }
 
-    pub async fn fetch_remote(&self, path: PathBuf, parent: u64) -> io::Result<()>  {
+    pub async fn fetch_remote(&self, path: PathBuf, parent: u64) -> io::Result<()> {
         let remote_entries = http::list_directory(
-            &self.cfg.server, &self.cfg.username, &self.cfg.password, path).await.unwrap();
-        for r_entry in remote_entries.iter(){
+            &self.cfg.server,
+            &self.cfg.username,
+            &self.cfg.password,
+            path,
+        )
+        .await
+        .unwrap();
+        for r_entry in remote_entries.iter() {
             match &r_entry.r#type {
-                Some(r#type) => {
-                    match r#type.as_str() {
-                        "file" => {
-                            let f_name = r_entry.name.as_ref().unwrap();
-                            self.make_node(
-                                parent, OsStr::new(f_name.as_str()), |entry| {
-                                    INode {
-                                        attr: {
-                                            info!("Adding file {:?} - {:?}", f_name, parent);
-                                            let mut attr = FileAttr::default();
-                                            attr.set_ino(entry.ino());
-                                            attr.set_mtime(r_entry.parse_rfc2822());
-                                            attr.set_size(r_entry.size.unwrap());
-                                            attr.set_nlink(1);
-                                            attr.set_mode(libc::S_IFREG | 0o444);
-                                            attr
-                                        },
-                                        xattrs: HashMap::new(),
-                                        refcount: 1,
-                                        links: 1,
-                                        kind: INodeKind::RegularFile(vec![]),
-                                    }
-                                })
-                                .await;
-                        }
-                        "directory" => {
-                            let f_name = r_entry.name.as_ref().unwrap();
-                            self.make_node(
-                                parent, OsStr::new(f_name.as_str()), |entry| {
-                                    INode {
-                                        attr: {
-                                            info!("Adding directory {:?} - {:?}", f_name, parent);
-                                            let mut attr = FileAttr::default();
-                                            attr.set_ino(entry.ino());
-                                            attr.set_mtime(r_entry.parse_rfc2822());
-                                            attr.set_nlink(1);
-                                            attr.set_mode(libc::S_IFDIR | 0o755);
-                                            attr
-                                        },
-                                        xattrs: HashMap::new(),
-                                        refcount: u64::max_value() / 2,
-                                        links: u64::max_value() / 2,
-                                        kind: INodeKind::Directory(Directory {
-                                            children: HashMap::new(),
-                                            parent: Some(parent),
-                                        }),
-                                    }
-                                }).await;
-                        }
-                        &_ => {}
+                Some(r#type) => match r#type.as_str() {
+                    "file" => {
+                        let f_name = r_entry.name.as_ref().unwrap();
+                        self.make_node(parent, OsStr::new(f_name.as_str()), |entry| INode {
+                            attr: {
+                                info!("Adding file {:?} - {:?}", f_name, parent);
+                                let mut attr = FileAttr::default();
+                                attr.set_ino(entry.ino());
+                                attr.set_mtime(r_entry.parse_rfc2822());
+                                attr.set_size(r_entry.size.unwrap());
+                                attr.set_nlink(1);
+                                attr.set_mode(libc::S_IFREG | 0o444);
+                                attr
+                            },
+                            xattrs: HashMap::new(),
+                            refcount: 1,
+                            links: 1,
+                            kind: INodeKind::RegularFile(vec![]),
+                        })
+                        .await;
                     }
-                }
+                    "directory" => {
+                        let f_name = r_entry.name.as_ref().unwrap();
+                        self.make_node(parent, OsStr::new(f_name.as_str()), |entry| INode {
+                            attr: {
+                                info!("Adding directory {:?} - {:?}", f_name, parent);
+                                let mut attr = FileAttr::default();
+                                attr.set_ino(entry.ino());
+                                attr.set_mtime(r_entry.parse_rfc2822());
+                                attr.set_nlink(1);
+                                attr.set_mode(libc::S_IFDIR | 0o755);
+                                attr
+                            },
+                            xattrs: HashMap::new(),
+                            refcount: u64::max_value() / 2,
+                            links: u64::max_value() / 2,
+                            kind: INodeKind::Directory(Directory {
+                                children: HashMap::new(),
+                                parent: Some(parent),
+                            }),
+                        })
+                        .await;
+                    }
+                    &_ => {}
+                },
                 None => {}
             }
         }
@@ -572,28 +567,24 @@ impl MemFS {
         // let clos = async ||  -> io::Result<HashMap<OsString, u64>> {
         // let clos =  || -> io::Result<HashMap<OsString, u64>> {
         let mut parent_ino: u64 = 0;
-        let children =  match &inode.kind {
-                INodeKind::Directory(dir) => {
-                    match dir.parent {
-                        Some(parent) => {
-                            let par_inode = inodes.get(parent).ok_or_else(no_entry).unwrap();
-                            let par_inode = par_inode.lock().await;
+        let children = match &inode.kind {
+            INodeKind::Directory(dir) => match dir.parent {
+                Some(parent) => {
+                    let par_inode = inodes.get(parent).ok_or_else(no_entry).unwrap();
+                    let par_inode = par_inode.lock().await;
 
-                            parent_ino = par_inode.attr.ino();
+                    parent_ino = par_inode.attr.ino();
 
-                            let _uri = match &par_inode.kind {
-                                INodeKind::Directory(dir) => {
-                                    dir.children.clone()
-                                }
-                                _ => HashMap::new()
-                            };
-                            _uri
-                        }
-                        None => HashMap::new()
-                    }
+                    let _uri = match &par_inode.kind {
+                        INodeKind::Directory(dir) => dir.children.clone(),
+                        _ => HashMap::new(),
+                    };
+                    _uri
                 }
-                _ => {HashMap::new()}
-            };
+                None => HashMap::new(),
+            },
+            _ => HashMap::new(),
+        };
         // };
 
         // let children = clos().await.unwrap();
@@ -604,7 +595,6 @@ impl MemFS {
             }
         }
         Some((uri, parent_ino))
-
     }
 
     async fn do_opendir(&self, op: &op::Opendir<'_>) -> io::Result<ReplyOpen> {
@@ -616,7 +606,6 @@ impl MemFS {
         let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
 
         let inode = inode.lock().await;
-
 
         if inode.attr.nlink() == 0 {
             return Err(no_entry());
@@ -688,7 +677,7 @@ impl MemFS {
             links: 1,
             kind: INodeKind::RegularFile(vec![]),
         })
-            .await
+        .await
     }
 
     async fn do_mkdir(&self, op: &op::Mkdir<'_>) -> io::Result<ReplyEntry> {
@@ -709,7 +698,7 @@ impl MemFS {
                 parent: Some(op.parent()),
             }),
         })
-            .await
+        .await
     }
 
     async fn do_symlink(&self, op: &op::Symlink<'_>) -> io::Result<ReplyEntry> {
@@ -726,7 +715,7 @@ impl MemFS {
             links: 1,
             kind: INodeKind::Symlink(Arc::new(op.link().into())),
         })
-            .await
+        .await
     }
 
     async fn do_link(&self, op: &op::Link<'_>) -> io::Result<ReplyEntry> {
@@ -881,8 +870,8 @@ impl MemFS {
         op: &op::Write<'_>,
         reader: &mut R,
     ) -> io::Result<ReplyWrite>
-        where
-            R: Reader + Unpin,
+    where
+        R: Reader + Unpin,
     {
         let inodes = self.inodes.lock().await;
 
@@ -919,8 +908,8 @@ impl Filesystem for MemFS {
         cx: &'a mut Context<'cx, T>,
         op: Operation<'cx>,
     ) -> io::Result<()>
-        where
-            T: Reader + Writer + Send + Unpin,
+    where
+        T: Reader + Writer + Send + Unpin,
     {
         let span = tracing::debug_span!("MemFS::call", unique = cx.unique());
         span.in_scope(|| tracing::debug!(?op));
@@ -1001,14 +990,14 @@ enum Either<L, R> {
 }
 
 impl<L, R> Reply for Either<L, R>
-    where
-        L: Reply,
-        R: Reply,
+where
+    L: Reply,
+    R: Reply,
 {
     #[inline]
     fn collect_bytes<'a, C: ?Sized>(&'a self, collector: &mut C)
-        where
-            C: Collector<'a>,
+    where
+        C: Collector<'a>,
     {
         match self {
             Either::Left(l) => l.collect_bytes(collector),

@@ -2,12 +2,11 @@ use std::path::PathBuf;
 #[macro_use]
 extern crate log;
 use env_logger::Env;
-use std::{process,path::Path};
+use std::{path::Path, process};
 
 mod config;
 mod filesystem;
 mod http;
-
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
