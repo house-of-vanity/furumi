@@ -22,7 +22,9 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing_futures::Instrument;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::mem::swap;
+use std::error::Error;
 
 
 type Ino = u64;
@@ -171,7 +173,7 @@ impl MemFS {
     }
 
     async fn lookup_inode(&self, parent: Ino, name: &OsStr) -> io::Result<ReplyEntry> {
-        // warn!("==> lookup_inode: parent: {:?}, name: {:?}", parent, name);
+        error!("==> lookup_inode: parent: {:?}, name: {:?}", parent, name);
 
         let inodes = self.inodes.lock().await;
 
@@ -195,7 +197,7 @@ impl MemFS {
         where
             F: FnOnce(&VacantEntry<'_>) -> INode,
     {
-        // debug!("make_node: parent: {:?}, name: {:?}", parent, name);
+        debug!("make_node: parent: {:?}, name: {:?}", parent, name);
         let mut inodes = self.inodes.lock().await;
 
         let parent = inodes.get(parent).ok_or_else(no_entry)?;
@@ -342,11 +344,71 @@ impl MemFS {
         }
     }
 
+    async fn full_path(&self, parent_ino: u64) -> io::Result<PathBuf> {
+        let mut full_uri: PathBuf = PathBuf::new();
+        if parent_ino == 1 {
+            full_uri = PathBuf::from("/");
+
+        } else {
+            let mut vec_full_uri: Vec<PathBuf> = Vec::new();
+            let mut inode = parent_ino;
+            loop {
+                let p = self.inode_to_name(inode).await.unwrap();
+                if p.1 != 0 {
+                    vec_full_uri.push(p.0);
+                    inode = p.1;
+                }
+                else {
+                    break;
+                }
+            }
+            vec_full_uri.push(PathBuf::from("/"));
+            vec_full_uri.reverse();
+
+            for dir in vec_full_uri {
+                full_uri.push(dir);
+            }
+        }
+        Ok(full_uri)
+    }
+
+    async fn name_to_inode(&self, p_inode: u64, name: &OsStr) -> io::Result<u64>{
+        let inodes = self.inodes.lock().await;
+
+        let inode = inodes.get(p_inode).ok_or_else(no_entry)?;
+
+        let inode = inode.lock().await;
+
+        match &inode.kind {
+            INodeKind::Directory(ref dir) => Ok(dir.children[name]),
+            _ => panic!("Mismatch type: {:?}", inode.kind)
+        }
+    }
+
     async fn do_lookup(&self, op: &op::Lookup<'_>) -> io::Result<ReplyEntry> {
-        // warn!("do_lookup: op: {:?}", op);
-        let gg = self.lookup_inode(op.parent(), op.name()).await;
-        // warn!("===> do_lookup: lookup_inode: {:?}", gg);
-        gg
+        warn!("do_lookup {:?}", op);
+        let f_inode = self.name_to_inode(op.parent(), op.name()).await.unwrap();
+        //warn!("do_lookup f_inode {:?}", f_inode);
+        let inodes = self.inodes.lock().await;
+        let inode = inodes.get(f_inode).ok_or_else(no_entry)?;
+        let inode = inode.lock().await;
+        warn!("do_lookup inode {:?}", inode);
+        let file_path = match &inode.kind {
+            INodeKind::Directory(_) => {
+                drop(inode);
+                drop(inodes);
+                let mut file_path = self.full_path(op.parent()).await.unwrap();
+                file_path.push(op.name());
+                file_path
+            }
+            _ => {drop(inode);
+                drop(inodes);
+                PathBuf::new()}
+        };
+
+        warn!("{:?}", file_path);
+        self.fetch_remote(file_path, f_inode).await;
+        self.lookup_inode(op.parent(), op.name()).await
     }
 
     async fn do_forget(&self, forgets: &[Forget]) {
@@ -422,7 +484,7 @@ impl MemFS {
         }
     }
 
-    pub async fn fetch_remote(&self, path: &Path, parent: u64) -> io::Result<()>  {
+    pub async fn fetch_remote(&self, path: PathBuf, parent: u64) -> io::Result<()>  {
         let remote_entries = http::list_directory(
             &self.cfg.server, &self.cfg.username, &self.cfg.password, path).await.unwrap();
         for r_entry in remote_entries.iter(){
@@ -435,7 +497,7 @@ impl MemFS {
                                 parent, OsStr::new(f_name.as_str()), |entry| {
                                     INode {
                                         attr: {
-                                            // debug!("Adding file {:?} - {:?}", f_name, entry);
+                                            info!("Adding file {:?} - {:?}", f_name, parent);
                                             let mut attr = FileAttr::default();
                                             attr.set_ino(entry.ino());
                                             attr.set_mtime(r_entry.parse_rfc2822());
@@ -458,7 +520,7 @@ impl MemFS {
                                 parent, OsStr::new(f_name.as_str()), |entry| {
                                     INode {
                                         attr: {
-                                            // debug!("Adding directory {:?} - {:?}", f_name, entry);
+                                            info!("Adding directory {:?} - {:?}", f_name, parent);
                                             let mut attr = FileAttr::default();
                                             attr.set_ino(entry.ino());
                                             attr.set_mtime(r_entry.parse_rfc2822());
@@ -485,57 +547,53 @@ impl MemFS {
         Ok(())
     }
 
-    async fn full_path(&self, inode: u64) {
+    async fn inode_to_name(&self, inode_id: u64) -> Option<(PathBuf, u64)> {
+        let inodes = self.inodes.lock().await;
+
+        let inode = inodes.get(inode_id).ok_or_else(no_entry).unwrap();
+
+        let inode = inode.lock().await;
+
+        // let clos = async ||  -> io::Result<HashMap<OsString, u64>> {
+        // let clos =  || -> io::Result<HashMap<OsString, u64>> {
+        let mut parent_ino: u64 = 0;
+        let children =  match &inode.kind {
+                INodeKind::Directory(dir) => {
+                    match dir.parent {
+                        Some(parent) => {
+                            let par_inode = inodes.get(parent).ok_or_else(no_entry).unwrap();
+                            let par_inode = par_inode.lock().await;
+
+                            parent_ino = par_inode.attr.ino();
+
+                            let _uri = match &par_inode.kind {
+                                INodeKind::Directory(dir) => {
+                                    dir.children.clone()
+                                }
+                                _ => HashMap::new()
+                            };
+                            _uri
+                        }
+                        None => HashMap::new()
+                    }
+                }
+                _ => {HashMap::new()}
+            };
+        // };
+
+        // let children = clos().await.unwrap();
+        let mut uri = PathBuf::new();
+        for (name, c_inode) in &children {
+            if &inode_id == c_inode {
+                uri.push(name.as_os_str());
+            }
+        }
+        Some((uri, parent_ino))
 
     }
 
     async fn do_opendir(&self, op: &op::Opendir<'_>) -> io::Result<ReplyOpen> {
-        // debug!("do_opendir: op: {:?}", op);
-
-        let mut dirs = self.dir_handles.lock().await;
-        info!("dirs: {:?}", dirs);
-        for x in dirs {
-            info!("x: {:?}", x);
-
-        }
-        let inodes = self.inodes.lock().await;
-
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-
-        let inode = inode.lock().await;
-
-        let children = match &inode.kind {
-            INodeKind::Directory(dir) => {
-                match dir.parent {
-                    Some(parent) => {
-                        let par_inode = inodes.get(parent).ok_or_else(no_entry)?;
-                        let par_inode = par_inode.lock().await;
-
-                        let _uri = match &par_inode.kind {
-                            INodeKind::Directory(dir) => {
-                                dir.children.clone()
-                            }
-                            _ => HashMap::new()
-                        };
-                        _uri
-                    }
-                    None => HashMap::new()
-                }
-            }
-            _ => {HashMap::new()}
-        };
-
-        let mut uri = Path::new("/");
-        for (name, inode) in &children {
-            if inode == &op.ino() {
-                uri = Path::new(name.as_os_str());
-            }
-        }
-
-        drop(dirs);
-        drop(inodes);
-        drop(inode);
-        self.fetch_remote(uri, op.ino()).await;
+        error!("do_opendir: {:?}", op);
 
         let mut dirs = self.dir_handles.lock().await;
         let inodes = self.inodes.lock().await;

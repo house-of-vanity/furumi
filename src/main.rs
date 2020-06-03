@@ -25,7 +25,7 @@ async fn main() -> Result<(), std::io::Error> {
     }
 
     let memfs = filesystem::MemFS::new(&cfg);
-    memfs.fetch_remote(Path::new("/"), 1).await;
+    memfs.fetch_remote(PathBuf::from("/"), 1).await;
     polyfuse_tokio::mount(memfs, mountpoint, &[]).await?;
 
     Ok(())

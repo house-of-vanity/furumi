@@ -6,7 +6,7 @@ use std::{
     env,
     ffi::OsStr,
     fmt,
-    path::Path,
+    path::PathBuf,
     process,
     thread::sleep,
     time::{Duration,SystemTime},
@@ -36,9 +36,9 @@ pub async fn list_directory(
     server: &std::string::String, 
     username: &Option<String>, 
     password: &Option<String>, 
-    path: &Path) ->
+    path: PathBuf) ->
     Result<Vec<RemoteEntry>, reqwest::Error> {
-        info!("Fetching path '{}{}'", server, path.display());
+        info!("Fetching path '{}/{}'", server, path.display());
         let client = reqwest::Client::new();
         let http_auth = match username {
             Some(username) => {
