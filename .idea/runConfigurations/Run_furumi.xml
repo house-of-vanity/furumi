@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Run furumi" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="channel" value="STABLE" />
+    <option name="command" value="run --package furumi --bin furumi -- --conf /etc/mus-fuse.yml" />
+    <option name="allFeatures" value="false" />
+    <option name="nocapture" value="false" />
+    <option name="emulateTerminal" value="false" />
+    <option name="backtrace" value="SHORT" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+    <envs />
+    <method v="2">
+      <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      <option name="ToolBeforeRunTask" enabled="true" actionId="Tool_External Tools_fusermount -u mnt" />
+    </method>
+  </configuration>
+</component>

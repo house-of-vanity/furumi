@@ -1,0 +1,46 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "env": {
+                "RUST_BACKTRACE": "1",
+            },
+            "request": "launch",
+            "name": "Debug executable 'furumi'",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--",
+                    "--conf",
+                    "/etc/mus-fuse.yml"
+                ],
+            },
+            "cwd": "${workspaceFolder}",
+            "postDebugTask": "Umount FUSE",
+            "preLaunchTask": "Umount FUSE",
+        }
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'furumi'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=furumi",
+                    "--package=furumi"
+                ],
+                "filter": {
+                    "name": "furumi",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ],
+}
