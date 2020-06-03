@@ -387,27 +387,34 @@ impl MemFS {
 
     async fn do_lookup(&self, op: &op::Lookup<'_>) -> io::Result<ReplyEntry> {
         warn!("do_lookup {:?}", op);
-        let f_inode = self.name_to_inode(op.parent(), op.name()).await.unwrap();
-        //warn!("do_lookup f_inode {:?}", f_inode);
-        let inodes = self.inodes.lock().await;
-        let inode = inodes.get(f_inode).ok_or_else(no_entry)?;
-        let inode = inode.lock().await;
-        warn!("do_lookup inode {:?}", inode);
-        let file_path = match &inode.kind {
-            INodeKind::Directory(_) => {
-                drop(inode);
-                drop(inodes);
-                let mut file_path = self.full_path(op.parent()).await.unwrap();
-                file_path.push(op.name());
-                file_path
-            }
-            _ => {drop(inode);
-                drop(inodes);
-                PathBuf::new()}
-        };
 
-        warn!("{:?}", file_path);
-        self.fetch_remote(file_path, f_inode).await;
+        //warn!("do_lookup f_inode {:?}", f_inode);
+
+
+        match self.name_to_inode(
+            op.parent(), op.name()).await {
+            Ok(f_inode) => {
+                let inodes = self.inodes.lock().await;
+                let inode = inodes.get(f_inode).ok_or_else(no_entry)?;
+                let inode = inode.lock().await;
+                warn!("do_lookup inode {:?}", inode);
+                let file_path = match &inode.kind {
+                    INodeKind::Directory(_) => {
+                        drop(inode);
+                        drop(inodes);
+                        let mut file_path = self.full_path(op.parent()).await.unwrap();
+                        file_path.push(op.name());
+                        file_path
+                    }
+                    _ => {drop(inode);
+                        drop(inodes);
+                        PathBuf::new()}
+                };
+                warn!("{:?}", file_path);
+                self.fetch_remote(file_path, f_inode).await;}
+            Err(e) => warn!("Cant find inode for {:?} - {:?}", op.name(), e)
+        }
+
         self.lookup_inode(op.parent(), op.name()).await
     }
 
