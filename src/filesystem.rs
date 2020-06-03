@@ -372,16 +372,24 @@ impl MemFS {
         Ok(full_uri)
     }
 
-    async fn name_to_inode(&self, p_inode: u64, name: &OsStr) -> io::Result<u64>{
+    async fn name_to_inode(&self, p_inode: u64, name: &OsStr) -> Option<u64>{
         let inodes = self.inodes.lock().await;
+        match inodes.get(p_inode).ok_or_else(no_entry) {
+            Ok(inode) => {
+                let inode = inode.lock().await;
+                warn!("name_to_inode p_inode - {:?} name - {:?}", p_inode, name);
 
-        let inode = inodes.get(p_inode).ok_or_else(no_entry)?;
-
-        let inode = inode.lock().await;
-
-        match &inode.kind {
-            INodeKind::Directory(ref dir) => Ok(dir.children[name]),
-            _ => panic!("Mismatch type: {:?}", inode.kind)
+                match &inode.kind {
+                    INodeKind::Directory(ref dir) => {
+                        match dir.children.get(name) {
+                            Some(name) => Some(name.clone()),
+                            None => None
+                        }
+                    },
+                    _ => None
+                }
+            },
+            Err(e) => None
         }
     }
 
@@ -390,10 +398,10 @@ impl MemFS {
 
         //warn!("do_lookup f_inode {:?}", f_inode);
 
-
         match self.name_to_inode(
             op.parent(), op.name()).await {
-            Ok(f_inode) => {
+            Some(f_inode) => {
+                warn!("do_lookup f_inode {:?}", f_inode);
                 let inodes = self.inodes.lock().await;
                 let inode = inodes.get(f_inode).ok_or_else(no_entry)?;
                 let inode = inode.lock().await;
@@ -412,7 +420,7 @@ impl MemFS {
                 };
                 warn!("{:?}", file_path);
                 self.fetch_remote(file_path, f_inode).await;}
-            Err(e) => warn!("Cant find inode for {:?} - {:?}", op.name(), e)
+            None => warn!("Cant find inode for {:?}", op.name())
         }
 
         self.lookup_inode(op.parent(), op.name()).await
