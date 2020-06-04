@@ -881,25 +881,26 @@ impl MemFS {
             }
             counter += 1;
         };
-        drop(full_path_mutex);
-        let inodes = self.inodes.lock().await;
-
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let inode = inode.lock().await;
-
-
-        let content = match inode.kind {
-            INodeKind::RegularFile(ref content) => content,
-            _ => return Err(io::Error::from_raw_os_error(libc::EINVAL)),
-        };
-
+        // let inodes = self.inodes.lock().await;
+        //
+        // let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
+        // let inode = inode.lock().await;
+        //
+        //
+        // let content = match inode.kind {
+        //     INodeKind::RegularFile(ref content) => content,
+        //     _ => return Err(io::Error::from_raw_os_error(libc::EINVAL)),
+        // };
+        //
         let offset = op.offset() as usize;
         let size = op.size() as usize;
+        drop(full_path_mutex);
+        let chunk = self.http.read(full_path, size, offset).await.unwrap();
 
-        let content = content.get(offset..).unwrap_or(&[]);
-        let content = &content[..std::cmp::min(content.len(), size)];
+        //let content = content.get(offset..).unwrap_or(&[]);
+        //let content = &content[..std::cmp::min(content.len(), size)];
 
-        Ok(content.to_vec())
+        Ok(chunk.to_vec())
     }
 
     async fn do_write<R: ?Sized>(

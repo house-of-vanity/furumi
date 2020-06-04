@@ -55,14 +55,13 @@ impl HTTP {
         let client = reqwest::Client::builder()
             .user_agent(APP_USER_AGENT)
             .default_headers(headers)
-            // .gzip(true)
             .build().unwrap();
         Self {
             client,
             server
         }
     }
-    pub async fn list(&self, path: PathBuf, ) -> Result<Vec<RemoteEntry>, Error> {
+    pub async fn list(&self, path: PathBuf) -> Result<Vec<RemoteEntry>, Error> {
         debug!("Fetching path '{}/{}'", self.server, path.display());
         let mut client = &self.client;
         let resp = client
@@ -73,6 +72,25 @@ impl HTTP {
             .await?;
         info!("Found {} entries into '{}'", resp.len(), path.display());
         Ok(resp)
+    }
+
+    pub async fn read(&self, path: PathBuf, size: usize, offset: usize) -> Result<Vec<u8>, Error> {
+        debug!("Reading path '{}/{}'", self.server, path.display());
+        let mut headers = header::HeaderMap::new();
+        let range = format!("bytes={}-{}", offset, {offset+size});
+        headers.insert(header::RANGE, header::HeaderValue::from_str(range.as_str()).unwrap());
+
+
+        let mut client = &self.client;
+        let resp = client
+            .get(format!("{}/{}", self.server, path.display()).as_str())
+            .headers(headers)
+            .send()
+            .await?
+            .bytes()
+            .await?;
+        info!("Found {} entries into '{}'", resp.len(), path.display());
+        Ok(resp.to_vec())
     }
 }
 
