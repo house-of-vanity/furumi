@@ -2,7 +2,7 @@ use std::path::PathBuf;
 #[macro_use]
 extern crate log;
 use env_logger::Env;
-use std::{process};
+use std::process;
 
 mod config;
 mod filesystem;
@@ -29,7 +29,3 @@ async fn main() -> Result<(), std::io::Error> {
 
     Ok(())
 }
-/*
-Mkdir { parent: 1, name: "123", mode: 493, umask: 18 }
-Mknod { parent: 1, name: "123233", mode: 33188, rdev: 0, umask: 18 }
-*/

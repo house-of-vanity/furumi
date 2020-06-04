@@ -12,8 +12,8 @@ use polyfuse::{
 };
 use slab::Slab;
 
-
-use std::path::{PathBuf, Path};
+use crate::http::HTTP;
+use std::path::{Path, PathBuf};
 use std::{
     collections::hash_map::{Entry, HashMap},
     ffi::{OsStr, OsString},
@@ -24,7 +24,6 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing_futures::Instrument;
-use crate::http::HTTP;
 
 type Ino = u64;
 
@@ -174,7 +173,11 @@ impl MemFS {
         });
 
         Self {
-            http: HTTP::new(cfg.server.clone(), cfg.username.clone(), cfg.password.clone()),
+            http: HTTP::new(
+                cfg.server.clone(),
+                cfg.username.clone(),
+                cfg.password.clone(),
+            ),
             inodes: Mutex::new(inodes),
             f_ino_map: Mutex::new(Vec::new()),
             dir_handles: Mutex::default(),
@@ -426,7 +429,6 @@ impl MemFS {
                         let mut file_path = self.full_path(op.parent()).await.unwrap();
                         file_path.push(op.name());
                         self.fetch_remote(file_path, f_inode).await;
-
                     }
                     _ => {
                         drop(inode);
@@ -613,7 +615,7 @@ impl MemFS {
                 warn!("inode_mutex {:?}", inode_mutex);
                 Some((uri, parent_ino))
             }
-            INodeKind::Symlink(_) => Some((uri, parent_ino))
+            INodeKind::Symlink(_) => Some((uri, parent_ino)),
         };
         ret
     }
@@ -868,7 +870,6 @@ impl MemFS {
     }
 
     async fn do_read(&self, op: &op::Read<'_>) -> io::Result<impl Reply + Debug> {
-
         let full_path_mutex = self.f_ino_map.lock().await;
         let mut counter = 0;
         let full_path = loop {

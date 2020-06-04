@@ -1,5 +1,7 @@
 extern crate base64;
 
+use chrono::DateTime;
+use reqwest::{header, Client, Error};
 use serde::Deserialize;
 use std::{
     path::PathBuf,
@@ -7,14 +9,8 @@ use std::{
     thread::sleep,
     time::{Duration, SystemTime},
 };
-use chrono::{DateTime};
-use reqwest::{Client, Error, header};
 
-static APP_USER_AGENT: &str = concat!(
-env!("CARGO_PKG_NAME"),
-"/",
-env!("CARGO_PKG_VERSION"),
-);
+static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 #[derive(Default, Debug, Clone)]
 pub struct HTTP {
@@ -38,7 +34,7 @@ impl RemoteEntry {
 }
 
 impl HTTP {
-    pub fn new(server: String, username: Option<String>, password: Option<String>, ) -> Self {
+    pub fn new(server: String, username: Option<String>, password: Option<String>) -> Self {
         let mut headers = header::HeaderMap::new();
         match username {
             Some(username) => {
@@ -47,19 +43,19 @@ impl HTTP {
                 _buf.push_str(format!("{}:{}", username, password.as_ref().unwrap()).as_str());
                 let creds = base64::encode(_buf);
 
-                headers.insert(header::AUTHORIZATION, header::HeaderValue::from_str(format!("Basic {}", creds).as_str()).unwrap());
-
+                headers.insert(
+                    header::AUTHORIZATION,
+                    header::HeaderValue::from_str(format!("Basic {}", creds).as_str()).unwrap(),
+                );
             }
-            None => {},
+            None => {}
         };
         let client = reqwest::Client::builder()
             .user_agent(APP_USER_AGENT)
             .default_headers(headers)
-            .build().unwrap();
-        Self {
-            client,
-            server
-        }
+            .build()
+            .unwrap();
+        Self { client, server }
     }
     pub async fn list(&self, path: PathBuf) -> Result<Vec<RemoteEntry>, Error> {
         debug!("Fetching path '{}/{}'", self.server, path.display());
@@ -77,9 +73,11 @@ impl HTTP {
     pub async fn read(&self, path: PathBuf, size: usize, offset: usize) -> Result<Vec<u8>, Error> {
         debug!("Reading path '{}/{}'", self.server, path.display());
         let mut headers = header::HeaderMap::new();
-        let range = format!("bytes={}-{}", offset, {offset+size});
-        headers.insert(header::RANGE, header::HeaderValue::from_str(range.as_str()).unwrap());
-
+        let range = format!("bytes={}-{}", offset, { offset + size });
+        headers.insert(
+            header::RANGE,
+            header::HeaderValue::from_str(range.as_str()).unwrap(),
+        );
 
         let mut client = &self.client;
         let resp = client
@@ -93,4 +91,3 @@ impl HTTP {
         Ok(resp.to_vec())
     }
 }
-
