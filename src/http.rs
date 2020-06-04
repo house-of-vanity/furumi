@@ -7,6 +7,20 @@ use std::{
     thread::sleep,
     time::{Duration, SystemTime},
 };
+use chrono::{DateTime};
+use reqwest::{Client, Error, header};
+
+static APP_USER_AGENT: &str = concat!(
+env!("CARGO_PKG_NAME"),
+"/",
+env!("CARGO_PKG_VERSION"),
+);
+
+#[derive(Default, Debug, Clone)]
+pub struct HTTP {
+    client: Client,
+    server: String,
+}
 
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
 pub struct RemoteEntry {
@@ -23,35 +37,42 @@ impl RemoteEntry {
     }
 }
 
+impl HTTP {
+    pub fn new(server: String, username: Option<String>, password: Option<String>, ) -> Self {
+        let mut headers = header::HeaderMap::new();
+        match username {
+            Some(username) => {
+                info!("HTTP credentials has been configured. Securing connection.");
+                let mut _buf = String::new();
+                _buf.push_str(format!("{}:{}", username, password.as_ref().unwrap()).as_str());
+                let creds = base64::encode(_buf);
 
-use chrono::{DateTime};
+                headers.insert(header::AUTHORIZATION, header::HeaderValue::from_str(format!("Basic {}", creds).as_str()).unwrap());
 
-pub async fn list_directory(
-    server: &std::string::String,
-    username: &Option<String>,
-    password: &Option<String>,
-    path: PathBuf,
-) -> Result<Vec<RemoteEntry>, reqwest::Error> {
-    info!("Fetching path '{}/{}'", server, path.display());
-    let client = reqwest::Client::new();
-    let http_auth = match username {
-        Some(username) => {
-            // info!("Using Basic Auth");
-            let mut _buf = String::new();
-            _buf.push_str(format!("{}:{}", username, password.as_ref().unwrap()).as_str());
-
-            base64::encode(_buf)
+            }
+            None => {},
+        };
+        let client = reqwest::Client::builder()
+            .user_agent(APP_USER_AGENT)
+            .default_headers(headers)
+            // .gzip(true)
+            .build().unwrap();
+        Self {
+            client,
+            server
         }
-        None => String::new(),
-    };
-    //info!("AUTH: {:?}", http_auth);
-    let resp = client
-        .get(format!("{}/{}", server, path.display()).as_str())
-        .header("Authorization", format!("Basic {}", http_auth))
-        .send()
-        .await?
-        .json::<Vec<RemoteEntry>>()
-        .await?;
-    info!("Found {} entries into '{}'", resp.len(), path.display());
-    Ok(resp)
+    }
+    pub async fn list(&self, path: PathBuf, ) -> Result<Vec<RemoteEntry>, Error> {
+        debug!("Fetching path '{}/{}'", self.server, path.display());
+        let mut client = &self.client;
+        let resp = client
+            .get(format!("{}/{}", self.server, path.display()).as_str())
+            .send()
+            .await?
+            .json::<Vec<RemoteEntry>>()
+            .await?;
+        info!("Found {} entries into '{}'", resp.len(), path.display());
+        Ok(resp)
+    }
 }
+
