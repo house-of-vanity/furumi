@@ -2,18 +2,18 @@
 #![deny(clippy::unimplemented)]
 
 use crate::config;
-use crate::http;
+use crate::client;
 
 use polyfuse::{
     io::{Reader, Writer},
     op,
-    reply::{Collector, Reply, ReplyAttr, ReplyEntry, ReplyOpen, ReplyWrite, ReplyXattr},
-    Context, DirEntry, FileAttr, Filesystem, Forget, Operation,
+    reply::{Reply, ReplyAttr, ReplyEntry, ReplyOpen},
+    Context, DirEntry, FileAttr, Filesystem, Operation,
 };
 use slab::Slab;
 
-use crate::http::HTTP;
-use std::path::{Path, PathBuf};
+use crate::client::HTTP;
+use std::path::PathBuf;
 use std::{
     collections::hash_map::{Entry, HashMap},
     ffi::{OsStr, OsString},
@@ -24,7 +24,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tracing_futures::Instrument;
-
+use std::io::{Error, ErrorKind};
 type Ino = u64;
 
 //noinspection RsUnresolvedReference
@@ -50,11 +50,6 @@ impl INodeTable {
     //noinspection RsUnresolvedReference
     fn get(&self, ino: Ino) -> Option<Arc<Mutex<INode>>> {
         self.map.get(&ino).cloned()
-    }
-
-    //noinspection RsUnresolvedReference
-    fn remove(&mut self, ino: Ino) -> Option<Arc<Mutex<INode>>> {
-        self.map.remove(&ino)
     }
 }
 
@@ -90,7 +85,6 @@ struct INode {
 enum INodeKind {
     RegularFile(Vec<u8>),
     Directory(Directory),
-    Symlink(Arc<OsString>),
 }
 
 #[derive(Debug, Clone)]
@@ -140,7 +134,7 @@ struct FileInodeMap {
 //noinspection RsUnresolvedReference
 #[derive(Debug)]
 pub struct MemFS {
-    http: http::HTTP,
+    http: client::HTTP,
     inodes: Mutex<INodeTable>,
     f_ino_map: Mutex<Vec<FileInodeMap>>,
     ttl: Duration,
@@ -243,128 +237,6 @@ impl MemFS {
         }
     }
 
-    async fn link_node(&self, ino: u64, newparent: Ino, newname: &OsStr) -> io::Result<ReplyEntry> {
-        {
-            let inodes = self.inodes.lock().await;
-
-            let inode = inodes.get(ino).ok_or_else(no_entry)?;
-
-            let newparent = inodes.get(newparent).ok_or_else(no_entry)?;
-            let mut newparent = newparent.lock().await;
-            let newparent = match newparent.kind {
-                INodeKind::Directory(ref mut dir) => dir,
-                _ => return Err(io::Error::from_raw_os_error(libc::ENOTDIR)),
-            };
-
-            match newparent.children.entry(newname.into()) {
-                Entry::Occupied(..) => return Err(io::Error::from_raw_os_error(libc::EEXIST)),
-                Entry::Vacant(entry) => {
-                    entry.insert(ino);
-                    let mut inode = inode.lock().await;
-                    let inode = &mut *inode;
-                    inode.links += 1;
-                    inode.attr.set_nlink(inode.attr.nlink() + 1);
-                }
-            }
-        }
-
-        self.lookup_inode(newparent, newname).await
-    }
-
-    async fn unlink_node(&self, parent: Ino, name: &OsStr) -> io::Result<()> {
-        let inodes = self.inodes.lock().await;
-
-        let parent = inodes.get(parent).ok_or_else(no_entry)?;
-        let mut parent = parent.lock().await;
-        let parent = match parent.kind {
-            INodeKind::Directory(ref mut dir) => dir,
-            _ => return Err(io::Error::from_raw_os_error(libc::ENOTDIR)),
-        };
-
-        let &ino = parent.children.get(name).ok_or_else(no_entry)?;
-
-        let inode = inodes.get(ino).unwrap_or_else(|| unreachable!());
-        let mut inode = inode.lock().await;
-        let inode = &mut *inode;
-
-        match inode.kind {
-            INodeKind::Directory(ref dir) if !dir.children.is_empty() => {
-                return Err(io::Error::from_raw_os_error(libc::ENOTEMPTY));
-            }
-            _ => (),
-        }
-
-        parent
-            .children
-            .remove(name)
-            .unwrap_or_else(|| unreachable!());
-
-        inode.links = inode.links.saturating_sub(1);
-        inode.attr.set_nlink(inode.attr.nlink().saturating_sub(1));
-
-        Ok(())
-    }
-
-    async fn rename_node(&self, parent: Ino, name: &OsStr, newname: &OsStr) -> io::Result<()> {
-        let inodes = self.inodes.lock().await;
-
-        let parent = inodes.get(parent).ok_or_else(no_entry)?;
-        let mut parent = parent.lock().await;
-        let parent = match parent.kind {
-            INodeKind::Directory(ref mut dir) => dir,
-            _ => return Err(io::Error::from_raw_os_error(libc::ENOTDIR)),
-        };
-
-        let &ino = parent.children.get(name).ok_or_else(no_entry)?;
-
-        match parent.children.entry(newname.into()) {
-            Entry::Occupied(..) => Err(io::Error::from_raw_os_error(libc::EEXIST)),
-            Entry::Vacant(entry) => {
-                entry.insert(ino);
-                parent
-                    .children
-                    .remove(name)
-                    .unwrap_or_else(|| unreachable!());
-                Ok(())
-            }
-        }
-    }
-
-    async fn graft_node(
-        &self,
-        parent: Ino,
-        name: &OsStr,
-        newparent: Ino,
-        newname: &OsStr,
-    ) -> io::Result<()> {
-        debug_assert_ne!(parent, newparent);
-
-        let inodes = self.inodes.lock().await;
-
-        let parent = inodes.get(parent).ok_or_else(no_entry)?;
-        let mut parent = parent.lock().await;
-        let parent = match parent.kind {
-            INodeKind::Directory(ref mut dir) => dir,
-            _ => return Err(io::Error::from_raw_os_error(libc::ENOTDIR)),
-        };
-
-        let newparent = inodes.get(newparent).ok_or_else(no_entry)?;
-        let mut newparent = newparent.lock().await;
-        let newparent = match newparent.kind {
-            INodeKind::Directory(ref mut dir) => dir,
-            _ => return Err(io::Error::from_raw_os_error(libc::ENOTDIR)),
-        };
-
-        match newparent.children.entry(newname.into()) {
-            Entry::Occupied(..) => Err(io::Error::from_raw_os_error(libc::EEXIST)),
-            Entry::Vacant(entry) => {
-                let ino = parent.children.remove(name).ok_or_else(no_entry)?;
-                entry.insert(ino);
-                Ok(())
-            }
-        }
-    }
-
     async fn full_path(&self, parent_ino: u64) -> io::Result<PathBuf> {
         let mut full_uri: PathBuf = PathBuf::new();
         if parent_ino == 1 {
@@ -396,7 +268,7 @@ impl MemFS {
         match inodes.get(p_inode).ok_or_else(no_entry) {
             Ok(inode) => {
                 let inode = inode.lock().await;
-                warn!("name_to_inode p_inode - {:?} name - {:?}", p_inode, name);
+                debug!("name_to_inode: p_inode - '{:?}' name - '{:?}'", p_inode, name);
 
                 match &inode.kind {
                     INodeKind::Directory(ref dir) => match dir.children.get(name) {
@@ -411,24 +283,23 @@ impl MemFS {
     }
 
     async fn do_lookup(&self, op: &op::Lookup<'_>) -> io::Result<ReplyEntry> {
-        warn!("do_lookup {:?}", op);
-
-        //warn!("do_lookup f_inode {:?}", f_inode);
-
+        debug!("do_lookup: {:?}", op);
         match self.name_to_inode(op.parent(), op.name()).await {
             Some(f_inode) => {
-                warn!("do_lookup f_inode {:?}", f_inode);
                 let inodes = self.inodes.lock().await;
                 let inode = inodes.get(f_inode).ok_or_else(no_entry)?;
                 let inode = inode.lock().await;
-                warn!("do_lookup inode {:?}", inode);
                 match &inode.kind {
                     INodeKind::Directory(_) => {
                         drop(inode);
                         drop(inodes);
                         let mut file_path = self.full_path(op.parent()).await.unwrap();
                         file_path.push(op.name());
-                        self.fetch_remote(file_path, f_inode).await;
+                        // self.fetch_remote(file_path, f_inode).await.unwrap();
+                        match self.fetch_remote(file_path, f_inode).await {
+                            Err(_) => return Err(io::Error::from_raw_os_error(libc::ENODATA)),
+                            _ => {}
+                        }
                     }
                     _ => {
                         drop(inode);
@@ -436,28 +307,14 @@ impl MemFS {
                     }
                 };
             }
-            None => warn!("Cant find inode for {:?}", op.name()),
+            None => warn!("do_lookup: Cant find inode for {:?}", op.name()),
         }
 
         self.lookup_inode(op.parent(), op.name()).await
     }
 
-    async fn do_forget(&self, forgets: &[Forget]) {
-        let mut inodes = self.inodes.lock().await;
-
-        for forget in forgets {
-            if let Some(inode) = inodes.get(forget.ino()) {
-                let mut inode = inode.lock().await;
-                inode.refcount = inode.refcount.saturating_sub(forget.nlookup());
-                if inode.refcount == 0 && inode.links == 0 {
-                    inodes.remove(forget.ino());
-                }
-            }
-        }
-    }
-
     async fn do_getattr(&self, op: &op::Getattr<'_>) -> io::Result<ReplyAttr> {
-        // warn!("do_getattr: op: {:?}", op);
+        // debug!("do_getattr: op: {:?}", op);
         let inodes = self.inodes.lock().await;
 
         let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
@@ -467,56 +324,13 @@ impl MemFS {
         reply.ttl_attr(self.ttl);
 
         Ok(reply)
-    }
-
-    async fn do_setattr(&self, op: &op::Setattr<'_>) -> io::Result<ReplyAttr> {
-        let inodes = self.inodes.lock().await;
-
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let mut inode = inode.lock().await;
-
-        if let Some(mode) = op.mode() {
-            inode.attr.set_mode(mode);
-        }
-        if let Some(uid) = op.uid() {
-            inode.attr.set_uid(uid);
-        }
-        if let Some(gid) = op.gid() {
-            inode.attr.set_gid(gid);
-        }
-        if let Some(size) = op.size() {
-            inode.attr.set_size(size);
-        }
-        if let Some(atime) = op.atime() {
-            inode.attr.set_atime(atime);
-        }
-        if let Some(mtime) = op.mtime() {
-            inode.attr.set_mtime(mtime);
-        }
-        if let Some(ctime) = op.ctime() {
-            inode.attr.set_ctime(ctime);
-        }
-
-        let mut reply = ReplyAttr::new(inode.attr);
-        reply.ttl_attr(self.ttl);
-
-        Ok(reply)
-    }
-
-    async fn do_readlink(&self, op: &op::Readlink<'_>) -> io::Result<Arc<OsString>> {
-        let inodes = self.inodes.lock().await;
-
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let inode = inode.lock().await;
-
-        match inode.kind {
-            INodeKind::Symlink(ref link) => Ok(link.clone()),
-            _ => Err(io::Error::from_raw_os_error(libc::EINVAL)),
-        }
     }
 
     pub async fn fetch_remote(&self, path: PathBuf, parent: u64) -> io::Result<()> {
-        let remote_entries = self.http.list(path).await.unwrap();
+        let remote_entries = match self.http.list(path).await {
+            Ok(remote_entries) => remote_entries,
+            Err (e) => return Err(Error::new(ErrorKind::Other, format!("HTTP {:?}: {}", e.status(), e)))
+        };
         for r_entry in remote_entries.iter() {
             match &r_entry.r#type {
                 Some(r#type) => match r#type.as_str() {
@@ -525,9 +339,9 @@ impl MemFS {
                         let mut inode_map = self.f_ino_map.lock().await;
                         let mut full_name = self.full_path(parent).await.unwrap();
                         full_name.push(PathBuf::from(f_name));
-                        self.make_node(parent, OsStr::new(f_name.as_str()), |entry| INode {
+                        let _x = self.make_node(parent, OsStr::new(f_name.as_str()), |entry| INode {
                             attr: {
-                                info!("Adding file {:?}", full_name);
+                                debug!("fetch_remote: Adding file {:?}", full_name);
                                 inode_map.push(FileInodeMap {
                                     parent,
                                     ino: entry.ino(),
@@ -550,9 +364,9 @@ impl MemFS {
                     }
                     "directory" => {
                         let f_name = r_entry.name.as_ref().unwrap();
-                        self.make_node(parent, OsStr::new(f_name.as_str()), |entry| INode {
+                        let _x = self.make_node(parent, OsStr::new(f_name.as_str()), |entry| INode {
                             attr: {
-                                info!("Adding directory {:?} - {:?}", f_name, parent);
+                                debug!("fetch_remote: Adding directory {:?} - {:?}", f_name, parent);
                                 let mut attr = FileAttr::default();
                                 attr.set_ino(entry.ino());
                                 attr.set_mtime(r_entry.parse_rfc2822());
@@ -611,18 +425,14 @@ impl MemFS {
                 }
                 None => Some((uri, parent_ino)),
             },
-            INodeKind::RegularFile(_) => {
-                warn!("inode_mutex {:?}", inode_mutex);
-                Some((uri, parent_ino))
-            }
-            INodeKind::Symlink(_) => Some((uri, parent_ino)),
+            _ => Some((uri, parent_ino)),
         };
         ret
     }
 
     //noinspection RsUnresolvedReference
     async fn do_opendir(&self, op: &op::Opendir<'_>) -> io::Result<ReplyOpen> {
-        error!("do_opendir: {:?}", op);
+        debug!("do_opendir: {:?}", op);
 
         let mut dirs = self.dir_handles.lock().await;
         let inodes = self.inodes.lock().await;
@@ -647,7 +457,7 @@ impl MemFS {
     }
 
     async fn do_readdir(&self, op: &op::Readdir<'_>) -> io::Result<impl Reply + Debug> {
-        // warn!("do_readdir: op: {:?}", op);
+        debug!("do_readdir: op: {:?}", op);
         let dirs = self.dir_handles.lock().await;
 
         let dir = dirs
@@ -681,194 +491,6 @@ impl MemFS {
         Ok(())
     }
 
-    async fn do_mknod(&self, op: &op::Mknod<'_>) -> io::Result<ReplyEntry> {
-        warn!("do_mknod: op: {:?}", op);
-        match op.mode() & libc::S_IFMT {
-            libc::S_IFREG => (),
-            _ => return Err(io::Error::from_raw_os_error(libc::ENOTSUP)),
-        }
-
-        self.make_node(op.parent(), op.name(), |entry| INode {
-            attr: {
-                let mut attr = FileAttr::default();
-                attr.set_ino(entry.ino());
-                attr.set_nlink(1);
-                attr.set_mode(op.mode());
-                attr
-            },
-            xattrs: HashMap::new(),
-            refcount: 1,
-            links: 1,
-            kind: INodeKind::RegularFile(vec![]),
-        })
-        .await
-    }
-
-    async fn do_mkdir(&self, op: &op::Mkdir<'_>) -> io::Result<ReplyEntry> {
-        // warn!("do_mkdir: op: {:?}", op);
-        self.make_node(op.parent(), op.name(), |entry| INode {
-            attr: {
-                let mut attr = FileAttr::default();
-                attr.set_ino(entry.ino());
-                attr.set_nlink(2);
-                attr.set_mode(op.mode() | libc::S_IFDIR);
-                attr
-            },
-            xattrs: HashMap::new(),
-            refcount: 1,
-            links: 1,
-            kind: INodeKind::Directory(Directory {
-                children: HashMap::new(),
-                parent: Some(op.parent()),
-            }),
-        })
-        .await
-    }
-
-    async fn do_symlink(&self, op: &op::Symlink<'_>) -> io::Result<ReplyEntry> {
-        self.make_node(op.parent(), op.name(), |entry| INode {
-            attr: {
-                let mut attr = FileAttr::default();
-                attr.set_ino(entry.ino());
-                attr.set_nlink(1);
-                attr.set_mode(libc::S_IFLNK | 0o777);
-                attr
-            },
-            xattrs: HashMap::new(),
-            refcount: 1,
-            links: 1,
-            kind: INodeKind::Symlink(Arc::new(op.link().into())),
-        })
-        .await
-    }
-
-    async fn do_link(&self, op: &op::Link<'_>) -> io::Result<ReplyEntry> {
-        self.link_node(op.ino(), op.newparent(), op.newname()).await
-    }
-
-    async fn do_unlink(&self, op: &op::Unlink<'_>) -> io::Result<()> {
-        self.unlink_node(op.parent(), op.name()).await
-    }
-
-    async fn do_rmdir(&self, op: &op::Rmdir<'_>) -> io::Result<()> {
-        self.unlink_node(op.parent(), op.name()).await
-    }
-
-    async fn do_rename(&self, op: &op::Rename<'_>) -> io::Result<()> {
-        if op.flags() != 0 {
-            // TODO: handle RENAME_NOREPLACE and RENAME_EXCHANGE.
-            return Err(io::Error::from_raw_os_error(libc::EINVAL));
-        }
-
-        match (op.parent(), op.newparent()) {
-            (parent, newparent) if parent == newparent => {
-                self.rename_node(parent, op.name(), op.newname()).await
-            }
-            (parent, newparent) => {
-                self.graft_node(parent, op.name(), newparent, op.newname())
-                    .await
-            }
-        }
-    }
-
-    async fn do_getxattr(&self, op: &op::Getxattr<'_>) -> io::Result<impl Reply + Debug> {
-        // warn!("do_getxattr: op: {:?}", op);
-
-        let inodes = self.inodes.lock().await;
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let inode = inode.lock().await;
-
-        let value = inode
-            .xattrs
-            .get(op.name())
-            .ok_or_else(|| io::Error::from_raw_os_error(libc::ENODATA))?;
-
-        match op.size() {
-            0 => Ok(Either::Left(ReplyXattr::new(value.len() as u32))),
-            size => {
-                if value.len() as u32 > size {
-                    return Err(io::Error::from_raw_os_error(libc::ERANGE));
-                }
-                Ok(Either::Right(value.clone()))
-            }
-        }
-    }
-
-    async fn do_setxattr(&self, op: &op::Setxattr<'_>) -> io::Result<()> {
-        // warn!("do_setxattr: op: {:?}", op);
-
-        let create = op.flags() as i32 & libc::XATTR_CREATE != 0;
-        let replace = op.flags() as i32 & libc::XATTR_REPLACE != 0;
-        if create && replace {
-            return Err(io::Error::from_raw_os_error(libc::EINVAL));
-        }
-
-        let inodes = self.inodes.lock().await;
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let mut inode = inode.lock().await;
-
-        match inode.xattrs.entry(op.name().into()) {
-            Entry::Occupied(..) if create => Err(io::Error::from_raw_os_error(libc::EEXIST)),
-            Entry::Occupied(entry) => {
-                let value = Arc::make_mut(entry.into_mut());
-                *value = op.value().into();
-                Ok(())
-            }
-            Entry::Vacant(..) if replace => Err(io::Error::from_raw_os_error(libc::ENODATA)),
-            Entry::Vacant(entry) => {
-                if create {
-                    entry.insert(Arc::default());
-                } else {
-                    entry.insert(Arc::new(op.value().into()));
-                }
-                Ok(())
-            }
-        }
-    }
-
-    async fn do_listxattr(&self, op: &op::Listxattr<'_>) -> io::Result<impl Reply + Debug> {
-        // warn!("do_listxattr: op: {:?}", op);
-        let inodes = self.inodes.lock().await;
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let inode = inode.lock().await;
-
-        match op.size() {
-            0 => {
-                let total_len = inode.xattrs.keys().map(|name| name.len() as u32 + 1).sum();
-                Ok(Either::Left(ReplyXattr::new(total_len)))
-            }
-            size => {
-                let mut total_len = 0;
-                let names = inode.xattrs.keys().fold(OsString::new(), |mut acc, name| {
-                    acc.push(name);
-                    acc.push("\0");
-                    total_len += name.len() as u32 + 1;
-                    acc
-                });
-
-                if total_len > size {
-                    return Err(io::Error::from_raw_os_error(libc::ERANGE));
-                }
-
-                Ok(Either::Right(names))
-            }
-        }
-    }
-
-    async fn do_removexattr(&self, op: &op::Removexattr<'_>) -> io::Result<()> {
-        let inodes = self.inodes.lock().await;
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let mut inode = inode.lock().await;
-
-        match inode.xattrs.entry(op.name().into()) {
-            Entry::Occupied(entry) => {
-                entry.remove();
-                Ok(())
-            }
-            Entry::Vacant(..) => Err(io::Error::from_raw_os_error(libc::ENODATA)),
-        }
-    }
-
     async fn do_read(&self, op: &op::Read<'_>) -> io::Result<impl Reply + Debug> {
         let full_path_mutex = self.f_ino_map.lock().await;
         let mut counter = 0;
@@ -882,60 +504,18 @@ impl MemFS {
             }
             counter += 1;
         };
-        // let inodes = self.inodes.lock().await;
-        //
-        // let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        // let inode = inode.lock().await;
-        //
-        //
-        // let content = match inode.kind {
-        //     INodeKind::RegularFile(ref content) => content,
-        //     _ => return Err(io::Error::from_raw_os_error(libc::EINVAL)),
-        // };
-        //
         let offset = op.offset() as usize;
         let size = op.size() as usize;
         drop(full_path_mutex);
-        let chunk = self.http.read(full_path, size, offset).await.unwrap();
-
-        //let content = content.get(offset..).unwrap_or(&[]);
-        //let content = &content[..std::cmp::min(content.len(), size)];
-
-        Ok(chunk.to_vec())
-    }
-
-    async fn do_write<R: ?Sized>(
-        &self,
-        op: &op::Write<'_>,
-        reader: &mut R,
-    ) -> io::Result<ReplyWrite>
-    where
-        R: Reader + Unpin,
-    {
-        let inodes = self.inodes.lock().await;
-
-        let inode = inodes.get(op.ino()).ok_or_else(no_entry)?;
-        let mut inode = inode.lock().await;
-        let inode = &mut *inode;
-
-        let content = match inode.kind {
-            INodeKind::RegularFile(ref mut content) => content,
-            _ => return Err(io::Error::from_raw_os_error(libc::EINVAL)),
+        let chunk = match self.http.read(full_path, size, offset).await {
+            Ok(data) => data,
+            Err (e) => {
+                let msg =  format!("HTTP {:?}: {}", e.status(), e);
+                error!("Read error. {:?}", msg);
+                return Err(Error::new(ErrorKind::Other, msg))
+            }
         };
-
-        let offset = op.offset() as usize;
-        let size = op.size() as usize;
-
-        content.resize(offset + size, 0);
-
-        use futures::io::AsyncReadExt;
-        reader
-            .read_exact(&mut content[offset..offset + size])
-            .await?;
-
-        inode.attr.set_size(content.len() as u64);
-
-        Ok(ReplyWrite::new(op.size()))
+        Ok(chunk.to_vec())
     }
 }
 
@@ -971,40 +551,11 @@ impl Filesystem for MemFS {
 
         match op {
             Operation::Lookup(op) => try_reply!(self.do_lookup(&op)),
-            Operation::Forget(forgets) => {
-                self.do_forget(forgets.as_ref()).await;
-                Ok(())
-            }
             Operation::Getattr(op) => try_reply!(self.do_getattr(&op)),
-            Operation::Setattr(op) => try_reply!(self.do_setattr(&op)),
-            Operation::Readlink(op) => try_reply!(self.do_readlink(&op)),
-
             Operation::Opendir(op) => try_reply!(self.do_opendir(&op)),
             Operation::Readdir(op) => try_reply!(self.do_readdir(&op)),
             Operation::Releasedir(op) => try_reply!(self.do_releasedir(&op)),
-
-            Operation::Mknod(op) => try_reply!(self.do_mknod(&op)),
-            Operation::Mkdir(op) => try_reply!(self.do_mkdir(&op)),
-            Operation::Symlink(op) => try_reply!(self.do_symlink(&op)),
-            Operation::Unlink(op) => try_reply!(self.do_unlink(&op)),
-            Operation::Rmdir(op) => try_reply!(self.do_rmdir(&op)),
-            Operation::Link(op) => try_reply!(self.do_link(&op)),
-            Operation::Rename(op) => try_reply!(self.do_rename(&op)),
-
-            Operation::Getxattr(op) => try_reply!(self.do_getxattr(&op)),
-            Operation::Setxattr(op) => try_reply!(self.do_setxattr(&op)),
-            Operation::Listxattr(op) => try_reply!(self.do_listxattr(&op)),
-            Operation::Removexattr(op) => try_reply!(self.do_removexattr(&op)),
-
             Operation::Read(op) => try_reply!(self.do_read(&op)),
-            Operation::Write(op) => {
-                let res = self
-                    .do_write(&op, &mut cx.reader())
-                    .instrument(span.clone())
-                    .await;
-                try_reply!(async { res })
-            }
-
             _ => {
                 span.in_scope(|| tracing::debug!("NOSYS"));
                 Ok(())
@@ -1019,28 +570,4 @@ fn no_entry() -> io::Error {
 
 fn unknown_error() -> io::Error {
     io::Error::from_raw_os_error(libc::EIO)
-}
-
-// FIXME: use either crate.
-#[derive(Debug)]
-enum Either<L, R> {
-    Left(L),
-    Right(R),
-}
-
-impl<L, R> Reply for Either<L, R>
-where
-    L: Reply,
-    R: Reply,
-{
-    #[inline]
-    fn collect_bytes<'a, C: ?Sized>(&'a self, collector: &mut C)
-    where
-        C: Collector<'a>,
-    {
-        match self {
-            Either::Left(l) => l.collect_bytes(collector),
-            Either::Right(r) => r.collect_bytes(collector),
-        }
-    }
 }

@@ -1,8 +1,13 @@
 [package]
 name = "furumi"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["AB <ultradesu@hexor.ru>"]
 edition = "2018"
+license = "WTFPL"
+readme = "README.md"
+description = """\
+Written safely in Rust, read-only FUSE FS on top of  \
+NGINX JSON autoindex."""
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,16 +29,17 @@ tokio = { version = "0.2", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 clap = {version = "2.33", features = ["yaml"]}
 serde_json = "1.0"
-percent-encoding = "2.1"
-time = "0.1"
+#percent-encoding = "2.1"
+#time = "0.1"
 chrono = "0.4"
 env_logger = "0.7"
 log = { version = "^0.4.5", features = ["std"] }
-size_format = "1.0"
+#size_format = "1.0"
 base64 = "0.12"
-ctrlc = "3.1"
+#ctrlc = "3.1"
 config = "0.9"
-itertools = "*"
+itertools = "0.9"
+http = "0.2"
 
 [dev-dependencies.tokio]
 version = "0.2"

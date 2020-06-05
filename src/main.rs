@@ -3,21 +3,16 @@ use std::path::PathBuf;
 extern crate log;
 use env_logger::Env;
 use std::process;
-use std::ffi::OsStr;
 
 mod config;
 mod filesystem;
-mod http;
+mod client;
 use itertools::Itertools;
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
     let cfg = config::read();
-    //let http::list_directory(&cfg.server, &cfg.username, &cfg.password, "/").await;
-    warn!("{:?}", cfg);
-
-    //let mut args = pico_args::Arguments::from_env();
 
     let mountpoint: PathBuf = PathBuf::from(&cfg.mountpoint);
     if !mountpoint.is_dir() {
@@ -27,13 +22,19 @@ async fn main() -> Result<(), std::io::Error> {
     let options = [
         "ro",
         "fsname=furumi-http",
-        // "sync_read",
         "auto_unmount",
         "allow_other",
     ].iter().join(",");
 
     let memfs = filesystem::MemFS::new(&cfg);
-    memfs.fetch_remote(PathBuf::from("/"), 1).await;
+    match memfs.fetch_remote(PathBuf::from("/"), 1).await {
+        Err(e) => {
+            error!("Connection failed. Check server address and credentials {}", e);
+            process::exit(0x0005);
+        }
+        _ => {}
+    }
+
     polyfuse_tokio::mount(memfs, mountpoint, &[
         "-o".as_ref(),
         options.as_ref(),

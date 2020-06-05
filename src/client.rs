@@ -5,9 +5,7 @@ use reqwest::{header, Client, Error};
 use serde::Deserialize;
 use std::{
     path::PathBuf,
-    process,
-    thread::sleep,
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 
 static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
@@ -59,7 +57,7 @@ impl HTTP {
     }
     pub async fn list(&self, path: PathBuf) -> Result<Vec<RemoteEntry>, Error> {
         debug!("Fetching path '{}/{}'", self.server, path.display());
-        let mut client = &self.client;
+        let client = &self.client;
         let resp = client
             .get(format!("{}/{}", self.server, path.display()).as_str())
             .send()
@@ -71,16 +69,14 @@ impl HTTP {
     }
 
     pub async fn read(&self, path: PathBuf, size: usize, offset: usize) -> Result<Vec<u8>, Error> {
-        debug!("Reading path '{}/{}'", self.server, path.display());
         let mut headers = header::HeaderMap::new();
-        let range = format!("bytes={}-{}", offset, { offset + size - 1 });
-        info!("range = {:?}", range);
+        let range = format!("bytes={}-{}", offset, {offset + size - 1});
+        debug!("Reading path '{}' range {} ({} bytes)", path.display(), range, size);
         headers.insert(
             header::RANGE,
             header::HeaderValue::from_str(range.as_str()).unwrap(),
         );
-
-        let mut client = &self.client;
+        let client = &self.client;
         let resp = client
             .get(format!("{}/{}", self.server, path.display()).as_str())
             .headers(headers)
@@ -88,7 +84,7 @@ impl HTTP {
             .await?
             .bytes()
             .await?;
-        info!("Found {} entries into '{}'", resp.len(), path.display());
+        debug!("Received {} bytes of '{}'", resp.len(), path.display());
         Ok(resp.to_vec())
     }
 }
