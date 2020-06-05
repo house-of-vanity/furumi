@@ -3,6 +3,7 @@ on:
   push:
     tags:
     - 'v*'
+
 jobs:
   make_bin:
     name: Build binary
@@ -89,17 +90,17 @@ jobs:
         with:
           name: arch_linux_furumi-x86_64.pkg.tar.zst
           path: ./
-      - name: Download Deb Package
-        uses: actions/download-artifact@v1
-        with:
-          name: furumi_amd64.deb
-          path: ./
+#     - name: Download Deb Package
+#       uses: actions/download-artifact@v1
+#       with:
+#         name: furumi_amd64.deb
+#         path: ./
       - name: Upload binary assets
         run: |
            wget https://github.com/aktau/github-release/releases/download/v0.7.2/linux-amd64-github-release.tar.bz2
            tar xjf linux-amd64-github-release.tar.bz2
            export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
-           ./bin/linux/amd64/github-release upload -u house-of-vanity -r furumi --tag ${{ steps.get_version.outputs.FULL_TAG }} --name furumi_${{ steps.get_version.outputs.VERSION }}_amd64.deb --file ./furumi_amd64.deb
+#          ./bin/linux/amd64/github-release upload -u house-of-vanity -r furumi --tag ${{ steps.get_version.outputs.FULL_TAG }} --name furumi_${{ steps.get_version.outputs.VERSION }}_amd64.deb --file ./furumi_amd64.deb
            ./bin/linux/amd64/github-release upload -u house-of-vanity -r furumi --tag ${{ steps.get_version.outputs.FULL_TAG }} --name arch_linux_furumi-${{ steps.get_version.outputs.VERSION }}-x86_64.pkg.tar.zst --file ./furumi-x86_64.pkg.tar.zst
            ./bin/linux/amd64/github-release upload -u house-of-vanity -r furumi --tag ${{ steps.get_version.outputs.FULL_TAG }} --name furumi-${{ steps.get_version.outputs.VERSION }} --file ./furumi
 
