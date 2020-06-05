@@ -1,6 +1,6 @@
 # Furumi
 
-[![Build Status](https://github.com/house-of-vanity/furumi/workflows/Build%20and%20publish/badge.svg)](https://github.com/house-of-vanity/furumi/actions)
+![Build and publish](https://github.com/house-of-vanity/furumi/workflows/Build%20and%20publish/badge.svg)
 
 Furumi is a FUSE filesystem working over NGINX JSON autoindex. It's written in Rust stable.
 
@@ -34,8 +34,6 @@ $ ./target/release/furumi --config furumi.yml
 ## Dependencies
 
 FUSE must be installed to build and run furumi. (i.e. kernel driver and libraries. Some platforms may also require userland utils like `fusermount`). A default installation of FUSE is usually sufficient.
-
-!? To build fuse-rs or any program that depends on it, `pkg-config` needs to be installed as well.
 
 ### Linux
 
