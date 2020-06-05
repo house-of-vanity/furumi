@@ -3,7 +3,6 @@ on:
   push:
     tags:
     - 'v*'
-
 jobs:
   make_bin:
     name: Build binary
