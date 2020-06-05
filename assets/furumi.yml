@@ -1,0 +1,7 @@
+---
+server: https://server
+mountpoint: /mnt
+# Basic auth creds
+username: user
+password: pass
+

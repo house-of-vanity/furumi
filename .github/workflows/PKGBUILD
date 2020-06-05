@@ -1,0 +1,40 @@
+# Maintainer: AB <ab@hexor.ru>
+
+pkgname=furumi
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Furumi is a FUSE filesystem working over NGINX JSON autoindex."
+url="https://github.com/house-of-vanity/furumi.git"
+arch=($CARCH)
+license=(WTFPL custom)
+depends=(openssl fuse)
+makedepends=(cargo git)
+source=("git+https://github.com/house-of-vanity/$pkgname")
+sha512sums=('SKIP')
+backup=('etc/furumi.yml')
+
+pkgver() {
+  cd "$srcdir/$pkgname"
+  git describe --long --tags | awk -F '-' '{print $1}'| sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+}
+
+prepare() {
+  cd "$srcdir/$pkgname"
+  cargo fetch --target $CARCH-unknown-linux-gnu
+}
+
+build() {
+  cd "$srcdir/$pkgname"
+  cargo build --release --frozen --all-targets
+}
+
+package() {
+  install=$pkgname.install
+  cd "$srcdir/$pkgname"
+  install -Dt "$pkgdir/usr/bin" target/release/$pkgname
+  install -Dt "$pkgdir/usr/share/doc/$pkgname" -m644 README.md
+  install -Dt "$pkgdir/usr/lib/systemd/system" assets/$pkgname.service
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  mkdir -p "$pkgdir/etc"
+  cp -n assets/$pkgname.yml "$pkgdir/etc/$pkgname.yml"
+}
