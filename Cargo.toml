@@ -33,6 +33,7 @@ size_format = "1.0"
 base64 = "0.12"
 ctrlc = "3.1"
 config = "0.9"
+itertools = "*"
 
 [dev-dependencies.tokio]
 version = "0.2"

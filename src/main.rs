@@ -3,10 +3,12 @@ use std::path::PathBuf;
 extern crate log;
 use env_logger::Env;
 use std::process;
+use std::ffi::OsStr;
 
 mod config;
 mod filesystem;
 mod http;
+use itertools::Itertools;
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -22,10 +24,20 @@ async fn main() -> Result<(), std::io::Error> {
         error!("The mountpoint must be a directory");
         process::exit(0x0004);
     }
+    let options = [
+        "ro",
+        "fsname=furumi-http",
+        // "sync_read",
+        "auto_unmount",
+        "allow_other",
+    ].iter().join(",");
 
     let memfs = filesystem::MemFS::new(&cfg);
     memfs.fetch_remote(PathBuf::from("/"), 1).await;
-    polyfuse_tokio::mount(memfs, mountpoint, &[]).await?;
+    polyfuse_tokio::mount(memfs, mountpoint, &[
+        "-o".as_ref(),
+        options.as_ref(),
+    ],).await?;
 
     Ok(())
 }

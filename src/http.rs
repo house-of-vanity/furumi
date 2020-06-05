@@ -66,14 +66,15 @@ impl HTTP {
             .await?
             .json::<Vec<RemoteEntry>>()
             .await?;
-        info!("Found {} entries into '{}'", resp.len(), path.display());
+        debug!("Found {} entries into '{}'", resp.len(), path.display());
         Ok(resp)
     }
 
     pub async fn read(&self, path: PathBuf, size: usize, offset: usize) -> Result<Vec<u8>, Error> {
         debug!("Reading path '{}/{}'", self.server, path.display());
         let mut headers = header::HeaderMap::new();
-        let range = format!("bytes={}-{}", offset, { offset + size });
+        let range = format!("bytes={}-{}", offset, { offset + size - 1 });
+        info!("range = {:?}", range);
         headers.insert(
             header::RANGE,
             header::HeaderValue::from_str(range.as_str()).unwrap(),
