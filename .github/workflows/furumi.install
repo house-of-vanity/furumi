@@ -1,0 +1,15 @@
+#!/bin/sh
+
+post_install() {
+  srv_name=furumi
+  if systemctl | grep -Fq "$srv_name"; then
+    sudo systemctl stop $srv_name.service
+  fi
+
+  sudo useradd --system --user-group --no-create-home --home-dir /run/$srv_name $srv_name
+  mkdir -p /mnt/$srv_name
+  chown $srv_name:$srv_name /mnt/$srv_name
+  echo ":: !!!!!!!!!!!!!!!"
+  echo ":: You need to uncomment 'user_allow_other' in /etc/fuse.conf"
+  echo ":: !!!!!!!!!!!!!!!"
+}
