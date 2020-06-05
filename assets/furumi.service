@@ -6,7 +6,7 @@ Type=simple
 User=furumi
 RestartSec=5
 Restart=always
-ExecStart=/usr/bin/furumi --config /etc/furumi.yml
+ExecStart=/usr/bin/furumi --conf /etc/furumi.yml
 KillSignal=SIGINT
 
 [Install]
