@@ -31,6 +31,24 @@ $ ./target/release/furumi --config furumi.yml
 
 ```
 
+## NGINX config
+Example of nginx config:
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name music;
+
+    root /storage/music;
+
+    location / {
+        autoindex on;
+        autoindex_format json;
+        try_files $uri $uri/ =404;
+    }
+}
+```
+
 ## Dependencies
 
 FUSE must be installed to build and run furumi. (i.e. kernel driver and libraries. Some platforms may also require userland utils like `fusermount`). A default installation of FUSE is usually sufficient.
