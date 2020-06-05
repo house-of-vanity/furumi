@@ -3,9 +3,10 @@
 </h1>
 <div align="center">
   <strong>
-    FUSE filesystem working over NGINX JSON autoindex.
+    FUSE filesystem working over NGINX JSON autoindex. <br />
     Written in Rust stable.
   </strong>
+    <br />
   <img src="https://github.com/house-of-vanity/furumi/workflows/Build%20and%20publish/badge.svg" alt="Build and publish"/>
 </div>
 
