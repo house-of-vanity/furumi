@@ -24,6 +24,7 @@ pub fn read() -> Config {
                 .short("c")
                 .long("conf")
                 .help("Config file to use")
+                .default_value("/etc/furumi.yml")
                 .takes_value(true)
                 .required(true),
         )
