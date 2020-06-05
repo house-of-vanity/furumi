@@ -27,7 +27,7 @@ username: user
 password: pass
 
 # Run
-$ ./target/release/furumi --config furumi.yml
+$ ./target/release/furumi --conf furumi.yml
 
 ```
 
