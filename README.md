@@ -1,8 +1,16 @@
-# Furumi
+<h1 align="center">
+  <code>Furumi</code>
+</h1>
+<div align="center">
+  <strong>
+    FUSE filesystem working over NGINX JSON autoindex.
+    Written in Rust stable.
+  </strong>
+  <img src="https://github.com/house-of-vanity/furumi/workflows/Build%20and%20publish/badge.svg" alt="Build and publish"/>
+</div>
 
-![Build and publish](https://github.com/house-of-vanity/furumi/workflows/Build%20and%20publish/badge.svg)
 
-Furumi is a FUSE filesystem working over NGINX JSON autoindex. It's written in Rust stable.
+
 
 
 # Features
