@@ -140,6 +140,20 @@ pub struct MemFS {
     ttl: Duration,
     dir_handles: Mutex<Slab<Arc<Mutex<DirHandle>>>>,
     cfg: config::Config,
+    metrix: Metrix,
+}
+
+#[derive(Debug)]
+struct Metrix {
+    rx: u64,
+}
+
+impl Metrix {
+    fn new() -> Metrix {
+        Metrix{
+          rx: 0,
+        }
+    }
 }
 
 impl MemFS {
@@ -177,6 +191,7 @@ impl MemFS {
             dir_handles: Mutex::default(),
             ttl: Duration::from_secs(60 * 60 * 24),
             cfg: cfg.clone(),
+            metrix: Metrix::new(),
         }
     }
 
