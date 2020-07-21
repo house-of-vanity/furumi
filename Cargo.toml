@@ -1,6 +1,6 @@
 [package]
 name = "furumi"
-version = "1.0.2"
+version = "1.0.3"
 authors = ["AB <ultradesu@hexor.ru>"]
 edition = "2018"
 license = "WTFPL"

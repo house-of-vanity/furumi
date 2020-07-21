@@ -1,5 +1,7 @@
 [Unit]
 Description=Mount furumi HTTP FS
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -7,7 +9,8 @@ User=furumi
 RestartSec=5
 Restart=always
 ExecStart=/usr/bin/furumi --conf /etc/furumi.yml
-KillSignal=SIGINT
+KillSignal=SIGTERM
+KillMode=mixed
 
 [Install]
 WantedBy=default.target
